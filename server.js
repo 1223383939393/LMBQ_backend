@@ -4,22 +4,43 @@ const http = require("http");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const path = require("path");
+const multer = require("multer");
 
 const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET_KEY_CHANGE_ME";
+const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
 const app = express();
 
 // ===== CORS =====
-// Для учебного проекта делаем открытый CORS, чтобы фронт на Vercel спокойно ходил к этому серверу.
 app.use(
   cors({
-    origin: "*", // можно сузить до ["https://lmbq.vercel.app"]
+    origin: "*", // при желании сузишь до фронтового домена
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 app.use(express.json());
+
+// ===== Multer: хранилище и раздача файлов =====
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, "uploads"));
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname || "");
+    cb(null, unique + ext);
+  },
+});
+
+const upload = multer({ storage });
+
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"))
+);
 
 // ===== In-memory users (demo) =====
 const users = [];
@@ -29,6 +50,7 @@ let nextUserId = 1;
 const posts = [];
 let nextPostId = 1;
 
+// ===== JWT helpers =====
 function createToken(user) {
   return jwt.sign(
     { id: user.id, username: user.username, email: user.email },
@@ -143,6 +165,26 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// ===== Upload images (multer) =====
+// POST /api/upload-images — загрузка нескольких файлов
+app.post(
+  "/api/upload-images",
+  authMiddleware,
+  upload.array("files", 10),
+  (req, res) => {
+    const files = req.files || [];
+    if (!files.length) {
+      return res.status(400).json({ error: "No files" });
+    }
+
+    const urls = files.map(
+      (f) => `${BASE_URL}/uploads/${encodeURIComponent(f.filename)}`
+    );
+
+    res.json({ urls });
+  }
+);
+
 // ===== Users endpoints =====
 app.get("/api/users", authMiddleware, (req, res) => {
   const minimized = users.map((u) => ({
@@ -209,7 +251,7 @@ app.post("/api/posts", authMiddleware, (req, res) => {
     id: String(nextPostId++),
     authorId: req.user.id,
     caption,
-    imageUrl: imageUrl || null,
+    imageUrl: imageUrl || null, // строка или "url1|||url2"
     tags: Array.isArray(tags) ? tags : [],
     likes: 0,
     likedByUserIds: [],
