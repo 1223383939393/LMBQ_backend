@@ -5,17 +5,20 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
 const multer = require("multer");
 
 const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET_KEY_CHANGE_ME";
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const BASE_URL =
+  process.env.BASE_URL || "http://localhost:3000";
 
 const app = express();
 
 // ===== CORS =====
 app.use(
   cors({
-    origin: "*", // при желании сузишь до фронтового домена
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -23,10 +26,17 @@ app.use(
 
 app.use(express.json());
 
-// ===== Multer: хранилище и раздача файлов =====
+// ===== Multer: uploads dir (Render-friendly) =====
+const uploadsDir =
+  process.env.UPLOADS_DIR || path.join(os.tmpdir(), "uploads");
+
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "uploads"));
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -37,10 +47,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.use(
-  "/uploads",
-  express.static(path.join(__dirname, "uploads"))
-);
+app.use("/uploads", express.static(uploadsDir));
 
 // ===== In-memory users (demo) =====
 const users = [];
@@ -70,7 +77,7 @@ function authMiddleware(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload; // { id, username, email }
+    req.user = payload;
     next();
   } catch (e) {
     return res.status(401).json({ error: "Invalid token" });
@@ -166,7 +173,6 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ===== Upload images (multer) =====
-// POST /api/upload-images — загрузка нескольких файлов
 app.post(
   "/api/upload-images",
   authMiddleware,
@@ -234,13 +240,10 @@ app.put("/api/users/me", authMiddleware, (req, res) => {
 });
 
 // ===== Posts endpoints =====
-
-// GET /api/posts — вся лента
 app.get("/api/posts", authMiddleware, (req, res) => {
   res.json(posts);
 });
 
-// POST /api/posts — создать пост
 app.post("/api/posts", authMiddleware, (req, res) => {
   const { caption, imageUrl, tags } = req.body;
   if (!caption) {
@@ -251,19 +254,18 @@ app.post("/api/posts", authMiddleware, (req, res) => {
     id: String(nextPostId++),
     authorId: req.user.id,
     caption,
-    imageUrl: imageUrl || null, // строка или "url1|||url2"
+    imageUrl: imageUrl || null,
     tags: Array.isArray(tags) ? tags : [],
     likes: 0,
     likedByUserIds: [],
     createdAt: new Date().toISOString(),
-    comments: [], // { id, authorId, text, createdAt }
+    comments: [],
   };
 
   posts.unshift(post);
   res.status(201).json(post);
 });
 
-// POST /api/posts/:postId/like — лайк/анлайк
 app.post("/api/posts/:postId/like", authMiddleware, (req, res) => {
   const post = posts.find((p) => p.id === req.params.postId);
   if (!post) return res.status(404).json({ error: "Post not found" });
@@ -282,7 +284,6 @@ app.post("/api/posts/:postId/like", authMiddleware, (req, res) => {
   res.json(post);
 });
 
-// POST /api/posts/:postId/comments — добавить комментарий
 app.post("/api/posts/:postId/comments", authMiddleware, (req, res) => {
   const post = posts.find((p) => p.id === req.params.postId);
   if (!post) return res.status(404).json({ error: "Post not found" });
@@ -303,7 +304,6 @@ app.post("/api/posts/:postId/comments", authMiddleware, (req, res) => {
   res.status(201).json(comment);
 });
 
-// GET /api/posts/:postId/comments — комментарии поста
 app.get("/api/posts/:postId/comments", authMiddleware, (req, res) => {
   const post = posts.find((p) => p.id === req.params.postId);
   if (!post) return res.status(404).json({ error: "Post not found" });
