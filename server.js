@@ -26,7 +26,7 @@ app.use(
 
 app.use(express.json());
 
-// ===== Multer: uploads dir (Render-friendly) =====
+// ===== Multer: uploads dir =====
 const uploadsDir =
   process.env.UPLOADS_DIR || path.join(os.tmpdir(), "uploads");
 
@@ -172,22 +172,28 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// ===== Upload images (multer) =====
+// ===== Upload media (images + audio) =====
+// поля: files[] - картинки, audios[] - аудио
 app.post(
-  "/api/upload-images",
+  "/api/upload-media",
   authMiddleware,
-  upload.array("files", 10),
+  upload.fields([
+    { name: "files", maxCount: 20 },
+    { name: "audios", maxCount: 10 },
+  ]),
   (req, res) => {
-    const files = req.files || [];
-    if (!files.length) {
-      return res.status(400).json({ error: "No files" });
-    }
+    const filesField = (req.files && req.files.files) || [];
+    const audiosField = (req.files && req.files.audios) || [];
 
-    const urls = files.map(
-      (f) => `${BASE_URL}/uploads/${encodeURIComponent(f.filename)}`
-    );
+    const images = filesField.map((f) => {
+      return `${BASE_URL}/uploads/${encodeURIComponent(f.filename)}`;
+    });
 
-    res.json({ urls });
+    const audios = audiosField.map((f) => {
+      return `${BASE_URL}/uploads/${encodeURIComponent(f.filename)}`;
+    });
+
+    res.json({ images, audios });
   }
 );
 
@@ -245,7 +251,7 @@ app.get("/api/posts", authMiddleware, (req, res) => {
 });
 
 app.post("/api/posts", authMiddleware, (req, res) => {
-  const { caption, imageUrl, tags } = req.body;
+  const { caption, imageUrl, audioUrl, tags } = req.body;
   if (!caption) {
     return res.status(400).json({ error: "caption is required" });
   }
@@ -254,7 +260,8 @@ app.post("/api/posts", authMiddleware, (req, res) => {
     id: String(nextPostId++),
     authorId: req.user.id,
     caption,
-    imageUrl: imageUrl || null,
+    imageUrl: imageUrl || null,   // "img1|||img2"
+    audioUrl: audioUrl || null,   // "audio1|||audio2"
     tags: Array.isArray(tags) ? tags : [],
     likes: 0,
     likedByUserIds: [],
